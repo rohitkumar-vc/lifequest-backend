@@ -15,7 +15,7 @@ conf = ConnectionConfig(
     MAIL_SSL_TLS=False,
     USE_CREDENTIALS=True,
     VALIDATE_CERTS=True,
-    TEMPLATE_FOLDER=Path(__file__).parent.parent.parent / 'templates/email'
+    TEMPLATE_FOLDER=Path(__file__).parent.parent / 'templates/email'
 )
 
 async def send_welcome_email(email_to: EmailStr, user_name: str, setup_link: str):
