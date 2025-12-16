@@ -10,3 +10,4 @@ python-multipart
 dnspython
 email-validator
 apscheduler
+requests

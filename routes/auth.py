@@ -21,9 +21,7 @@ class Token(BaseModel):
     refresh_token: Optional[str] = None
     token_type: str
 
-class UserCreate(BaseModel):
-    username: str
-    email: EmailStr
+from fastapi import BackgroundTasks
 
 class PasswordSetup(BaseModel):
     token: str
@@ -114,38 +112,50 @@ async def refresh_token_endpoint(request: RefreshTokenRequest):
     
     return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
 
+
+class UserCreate(BaseModel):
+    full_name: str
+    username: str
+    email: EmailStr
+
 @router.post("/admin/register-user")
-async def register_user(user_in: UserCreate):
-    """Admin creates a user. Generates token. Sends Email."""
-    # Check if user exists
+async def register_user(user_in: UserCreate, background_tasks: BackgroundTasks):
+    """
+    Admin creates a user. 
+    - Checks uniqueness (Email & Username).
+    - Creates active user with default password 'Test1234'.
+    - Sends Welcome Email in background (fire & forget).
+    """
+    # Check if user exists (Email OR Username)
     if await db.users.find_one({"email": user_in.email}):
         raise HTTPException(status_code=400, detail="Email already registered")
+    if await db.users.find_one({"username": user_in.username}):
+        raise HTTPException(status_code=400, detail="Username already exists")
     
-    # Create temp token for password setup (reuse JWT with special scope or just a random string)
-    setup_token = create_access_token(subject=user_in.email, expires_delta=timedelta(days=7))
+    # Default Password
+    hashed_password = get_password_hash("Test1234")
     
     # Create User
     new_user = User(
+        full_name=user_in.full_name,
         username=user_in.username,
         email=user_in.email,
-        hashed_password="", # No password yet
-        is_active=False,
-        reset_token=setup_token,
+        hashed_password=hashed_password,
+        is_active=True, # Active immediately
+        reset_token=None,
         stats=UserStats()
     )
     
     result = await db.users.insert_one(new_user.model_dump(by_alias=True, exclude={"id"}))
     
-    # Send Email
-    # Construct link (Frontend URL)
-    setup_link = f"http://localhost:5173/setup-password?token={setup_token}"
-    try:
-        await send_welcome_email(user_in.email, user_in.username, setup_link)
-    except Exception as e:
-        print(f"Failed to send email: {e}")
-        # Continue anyway for dev purposes, but ideally handle this
+    # Send Email (Background)
+    # Construct link (Login URL)
+    login_link = f"http://localhost:5173/login"
     
-    return {"message": "User created and invitation sent", "user_id": str(result.inserted_id)}
+    # Use background task so failure doesn't block response
+    background_tasks.add_task(send_welcome_email, user_in.email, user_in.full_name, login_link)
+    
+    return {"message": "User created successfully. Default password: Test1234", "user_id": str(result.inserted_id)}
 
 @router.post("/setup-password")
 async def setup_password(setup_in: PasswordSetup):

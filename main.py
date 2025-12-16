@@ -17,10 +17,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
 
+print(settings.FRONTEND_URL)
+
 # CORS
 origins = [
     settings.FRONTEND_URL,
-    "http://127.0.0.1:5173", # Keep local fallback just in case
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000", # Common alternative
 ]
 
 app.add_middleware(

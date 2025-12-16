@@ -14,6 +14,7 @@ class UserStats(BaseModel):
 
 class User(BaseModel):
     id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
+    full_name: str = "Adventurer"
     username: str
     email: EmailStr
     hashed_password: str

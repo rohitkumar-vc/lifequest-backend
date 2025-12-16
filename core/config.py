@@ -18,17 +18,10 @@ class Settings(BaseSettings):
     # Frontend
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
-    # Email
-    MAIL_USERNAME: str = os.getenv("MAIL_USERNAME", "")
-    MAIL_PASSWORD: str = os.getenv("MAIL_PASSWORD", "")
-    MAIL_FROM: str = os.getenv("MAIL_FROM", "admin@lifequest.app")
-    MAIL_PORT: int = int(os.getenv("MAIL_PORT", "587"))
-    MAIL_SERVER: str = os.getenv("MAIL_SERVER", "")
-    MAIL_FROM_NAME: str = "LifeQuest Admin"
-    MAIL_STARTTLS: bool = True
-    MAIL_SSL_TLS: bool = False
-    USE_CREDENTIALS: bool = True
-    VALIDATE_CERTS: bool = True
+    # Email (Mailgun)
+    MAILGUN_API_KEY: str = os.getenv("MAILGUN_API_KEY", "")
+    MAILGUN_DOMAIN: str = os.getenv("MAILGUN_DOMAIN", "") # e.g., sandbox....mailgun.org
+    MAIL_FROM: str = os.getenv("MAIL_FROM", "LifeQuest Admin")
     TEMPLATE_FOLDER: str = "templates/email"
 
     # Game Configuration (Defaults)
@@ -69,6 +62,6 @@ class Settings(BaseSettings):
     HP_PENALTY_HARD: int = 20
     
     # Pydantic Settings Config
-    model_config = {"env_file": ".env"}
+    model_config = {"env_file": ".env", "extra": "ignore"}
 
 settings = Settings()
