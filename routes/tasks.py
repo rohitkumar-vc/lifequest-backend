@@ -60,33 +60,53 @@ async def get_tasks(current_user: User = Depends(get_current_user)):
 @router.post("/{task_id}/complete", response_model=Task)
 async def complete_task(task_id: str, current_user: User = Depends(get_current_user)):
     """
-    Generic Completion (Mainly for Todos).
+    Toggle Task Completion (Todos).
     Logic:
-    - User Gold += Reward_Value.
-    - User XP += XP_Value.
-    - Dishonor Check: If is_dishonorable=True, XP = 0.
+    - If Pending -> Complete:
+        - User Gold += Reward.
+        - User XP += XP.
+        - Status -> Completed.
+    - If Completed -> Undo:
+        - User Gold -= Reward.
+        - User XP -= XP.
+        - Status -> Pending (or Active).
     """
     task_data = await db.tasks.find_one({"_id": ObjectId(task_id), "user_id": str(current_user.id)})
     if not task_data:
         raise HTTPException(status_code=404, detail="Task not found")
     
     task = Task(**task_data)
-    if task.completed:
-        raise HTTPException(status_code=400, detail="Task already completed")
-
-    # Update Stats
+    
+    # Calculate Rewards
     mult = settings.TODO_DIFFICULTY_MULTIPLIERS.get(task.difficulty, 1)
+    base_gold = settings.TODO_REWARD_GOLD * mult
+    base_xp = (settings.TODO_XP_VALUE * mult) if not task.is_dishonorable else 0
     
-    gold_increase = settings.TODO_REWARD_GOLD * mult
-    xp_increase = (settings.TODO_XP_VALUE * mult) if not task.is_dishonorable else 0
-    
-    new_gold = current_user.stats.gold + gold_increase
+    if not task.completed:
+        # --- COMPLETE TASK ---
+        new_completed = True
+        new_status = "completed"
+        gold_change = base_gold
+        xp_change = base_xp
+        log_msg = f"Completed task: {task.title}"
+        log_type = "completion"
+    else:
+        # --- UNDO TASK ---
+        new_completed = False
+        new_status = "pending" # Default for new tasks
+        gold_change = -base_gold
+        xp_change = -base_xp
+        log_msg = f"Undo task: {task.title}"
+        log_type = "undo"
+        
+    # Update Stats
+    new_gold = current_user.stats.gold + gold_change
     
     # Scaling Level Logic
-    new_level, new_xp = calculate_new_level_and_xp(
+    new_level, new_xp, new_max_xp = calculate_new_level_and_xp(
         current_user.stats.level, 
         current_user.stats.xp, 
-        xp_increase
+        xp_change
     )
     
     # Update User
@@ -95,23 +115,24 @@ async def complete_task(task_id: str, current_user: User = Depends(get_current_u
         {"$set": {
             "stats.gold": new_gold,
             "stats.xp": new_xp,
-            "stats.level": new_level
+            "stats.level": new_level,
+            "stats.max_xp": new_max_xp
         }}
     )
 
     # Log Activity
     await db.activity_logs.insert_one({
         "user_id": str(current_user.id),
-        "message": f"Completed task: {task.title}",
-        "xp_change": xp_increase,
-        "type": "completion",
+        "message": log_msg,
+        "xp_change": xp_change,
+        "type": log_type,
         "timestamp": get_current_time()
     })
     
-    # Update Task (No Streak for Todos)
+    # Update Task
     await db.tasks.update_one(
         {"_id": task.id},
-        {"$set": {"completed": True, "status": "completed"}}
+        {"$set": {"completed": new_completed, "status": new_status}}
     )
     
     updated_task = await db.tasks.find_one({"_id": task.id})
@@ -265,7 +286,7 @@ async def toggle_habit_status(task_id: str, current_user: User = Depends(get_cur
         # Award Rewards
         new_gold = current_user.stats.gold + gold_gain
         
-        new_level, new_xp = calculate_new_level_and_xp(
+        new_level, new_xp, new_max_xp = calculate_new_level_and_xp(
             current_user.stats.level,
             current_user.stats.xp,
             xp_gain
@@ -273,7 +294,12 @@ async def toggle_habit_status(task_id: str, current_user: User = Depends(get_cur
         
         await db.users.update_one(
             {"_id": current_user.id},
-            {"$set": {"stats.gold": new_gold, "stats.xp": new_xp, "stats.level": new_level}}
+            {"$set": {
+                "stats.gold": new_gold, 
+                "stats.xp": new_xp, 
+                "stats.level": new_level,
+                "stats.max_xp": new_max_xp
+            }}
         )
         
         # Log
@@ -307,7 +333,7 @@ async def toggle_habit_status(task_id: str, current_user: User = Depends(get_cur
             
         # Revert stats
         # Revert stats (Use scaling logic to handle potential de-leveling)
-        new_level, new_xp = calculate_new_level_and_xp(
+        new_level, new_xp, new_max_xp = calculate_new_level_and_xp(
             current_user.stats.level,
             current_user.stats.xp,
             -xp_gain
@@ -315,8 +341,22 @@ async def toggle_habit_status(task_id: str, current_user: User = Depends(get_cur
         
         await db.users.update_one(
             {"_id": current_user.id},
-            {"$set": {"stats.gold": current_user.stats.gold - gold_gain, "stats.xp": new_xp, "stats.level": new_level}}
+            {"$set": {
+                "stats.gold": current_user.stats.gold - gold_gain, 
+                "stats.xp": new_xp, 
+                "stats.level": new_level,
+                "stats.max_xp": new_max_xp
+            }}
         )
+        
+        # Log (Undo)
+        await db.activity_logs.insert_one({
+            "user_id": str(current_user.id),
+            "message": f"Habit Undo: {task.title}",
+            "xp_change": -xp_gain,
+            "type": "habit_undo",
+            "timestamp": now_ist
+        })
 
     # Update Task
     await db.tasks.update_one(
@@ -366,7 +406,7 @@ async def toggle_daily(task_id: str, current_user: User = Depends(get_current_us
     new_gold = current_user.stats.gold + gold_change
     new_xp = current_user.stats.xp + xp_change
     # Scaling Level Logic (Handles both gain and loss)
-    new_level, new_xp = calculate_new_level_and_xp(
+    new_level, new_xp, new_max_xp = calculate_new_level_and_xp(
         current_user.stats.level,
         current_user.stats.xp,
         xp_change
@@ -377,7 +417,8 @@ async def toggle_daily(task_id: str, current_user: User = Depends(get_current_us
         {"$set": {
             "stats.gold": new_gold,
             "stats.xp": new_xp, 
-            "stats.level": new_level
+            "stats.level": new_level,
+            "stats.max_xp": new_max_xp
         }}
     )
     
@@ -393,4 +434,15 @@ async def toggle_daily(task_id: str, current_user: User = Depends(get_current_us
     )
     
     updated_task = await db.tasks.find_one({"_id": task.id})
+
+    # Log Activity
+    log_message = f"Daily Completed: {task.title}" if new_completed else f"Daily Undo: {task.title}"
+    await db.activity_logs.insert_one({
+        "user_id": str(current_user.id),
+        "message": log_message,
+        "xp_change": xp_change,
+        "type": "daily",
+        "timestamp": get_current_time()
+    })
+
     return Task(**updated_task)
