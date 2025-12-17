@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     MAILGUN_DOMAIN: str = os.getenv("MAILGUN_DOMAIN", "") # e.g., sandbox....mailgun.org
     MAIL_FROM: str = os.getenv("MAIL_FROM", "LifeQuest Admin")
     TEMPLATE_FOLDER: str = "templates/email"
-
+    
     # Game Configuration (Defaults)
     # Scaling XP: Index 0 = Lvl 1->2, Index 1 = Lvl 2->3, etc.
     # Fallback to last value if level exceeds list length.
