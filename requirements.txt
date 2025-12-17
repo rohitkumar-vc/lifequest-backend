@@ -11,3 +11,4 @@ dnspython
 email-validator
 apscheduler
 requests
+uvloop
