@@ -12,4 +12,3 @@ email-validator
 apscheduler
 requests
 uvloop
-gunicorn
