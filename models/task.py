@@ -8,7 +8,7 @@ from core.time_utils import get_current_time
 class Task(BaseModel):
     id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
     user_id: str
-    title: str
+    title: str = Field(max_length=50)
     type: str # 'habit', 'daily', 'todo'
     difficulty: str # 'easy', 'medium', 'hard'
     description: Optional[str] = None
