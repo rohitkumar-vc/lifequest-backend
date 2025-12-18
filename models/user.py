@@ -18,7 +18,10 @@ class User(BaseModel):
     username: str
     email: EmailStr
     hashed_password: str
+    is_active: bool = True
     role: str = "user" # 'user' or 'admin'
+    status: str = "active" # active, inactive, invited
+    change_password_required: bool = False
     
     # Game Stats
     stats: UserStats = Field(default_factory=UserStats)
@@ -26,7 +29,6 @@ class User(BaseModel):
     # Auth
     reset_token: Optional[str] = None
     last_cron_check: datetime = Field(default_factory=get_current_time)
-    is_active: bool = False # False until they set password
 
     class Config:
         populate_by_name = True

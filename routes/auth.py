@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from pydantic import BaseModel, EmailStr
 from datetime import timedelta
-from typing import Optional
+from typing import Optional, List
 
 from core.config import settings
 from core.security import create_access_token, verify_password, get_password_hash
@@ -63,7 +63,12 @@ async def login_for_access_token(
         )
     user = User(**user_data)
     if not user.is_active:
-        raise HTTPException(status_code=400, detail="User not active. Please set your password first.")
+        raise HTTPException(status_code=400, detail="User account is disabled.")
+        
+    # Auto-activate invited users on first login
+    if user.status == "invited":
+        await db.users.update_one({"_id": user.id}, {"$set": {"status": "active"}})
+        user.status = "active"
         
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
@@ -141,7 +146,9 @@ async def register_user(user_in: UserCreate, background_tasks: BackgroundTasks):
         username=user_in.username,
         email=user_in.email,
         hashed_password=hashed_password,
-        is_active=True, # Active immediately
+        is_active=True, # Active so they can login
+        status="invited", # Track that they haven't joined yet
+        change_password_required=True, # Force password change on first login
         reset_token=None,
         stats=UserStats()
     )
@@ -150,12 +157,61 @@ async def register_user(user_in: UserCreate, background_tasks: BackgroundTasks):
     
     # Send Email (Background)
     # Construct link (Login URL)
-    login_link = f"http://localhost:5173/login"
+    login_link = f"{settings.FRONTEND_URL}/login"
     
     # Use background task so failure doesn't block response
     background_tasks.add_task(send_welcome_email, user_in.email, user_in.full_name, login_link)
     
     return {"message": "User created successfully. Default password: Test1234", "user_id": str(result.inserted_id)}
+
+@router.get("/admin/users", response_model=List[User])
+async def get_all_users(current_user: User = Depends(get_current_user)):
+    """List all users (Admin only)"""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    users_cursor = db.users.find({})
+    users = await users_cursor.to_list(length=1000)
+    # Ensure all have status field for response
+    return [User(**u) for u in users]
+
+class UserRoleUpdate(BaseModel):
+    role: str # user, admin
+
+@router.patch("/admin/users/{user_id}/role")
+async def update_user_role(user_id: str, role_in: UserRoleUpdate, current_user: User = Depends(get_current_user)):
+    """Update user role (Admin only)"""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    if user_id == str(current_user.id):
+        raise HTTPException(status_code=400, detail="Cannot change your own role")
+        
+    await db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"role": role_in.role}}
+    )
+    return {"message": "Role updated"}
+
+class UserStatusUpdate(BaseModel):
+    status: str # active, inactive
+
+@router.patch("/admin/users/{user_id}/status")
+async def update_user_status(user_id: str, status_in: UserStatusUpdate, current_user: User = Depends(get_current_user)):
+    """Enable/Disable user (Admin only)"""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    if user_id == str(current_user.id):
+        raise HTTPException(status_code=400, detail="Cannot disable your own account")
+    
+    is_active = True if status_in.status == "active" else False
+    
+    await db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"status": status_in.status, "is_active": is_active}}
+    )
+    return {"message": "Status updated"}
 
 @router.post("/setup-password")
 async def setup_password(setup_in: PasswordSetup):
@@ -238,7 +294,7 @@ async def change_password(payload: PasswordChange, current_user: User = Depends(
     
     await db.users.update_one(
         {"_id": current_user.id},
-        {"$set": {"hashed_password": hashed_password}}
+        {"$set": {"hashed_password": hashed_password, "change_password_required": False}}
     )
     
     return {"message": "Password updated successfully"}
