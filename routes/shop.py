@@ -21,6 +21,52 @@ class ItemCreate(BaseModel):
     description: str
     effect_type: str
 
+from datetime import datetime
+
+class Purchase(BaseModel):
+    id: str
+    item_id: str
+    item_name: str
+    cost: int
+    purchased_at: datetime
+
+@router.get("/history", response_model=List[Purchase])
+async def get_purchase_history(current_user: User = Depends(get_current_user)):
+    """Get purchase history for current user"""
+    cursor = db.purchases.find({"user_id": current_user.id}).sort("purchased_at", -1)
+    purchases = await cursor.to_list(100)
+    
+    return [
+        Purchase(
+            id=str(p["_id"]),
+            item_id=p["item_id"],
+            item_name=p["item_name"],
+            cost=p["cost"],
+            purchased_at=p["purchased_at"]
+        )
+        for p in purchases
+    ]
+
+@router.get("/admin/history/{user_id}", response_model=List[Purchase])
+async def get_admin_purchase_history(user_id: str, current_user: User = Depends(get_current_user)):
+    """Admin only: Get purchase history for a specific user"""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    cursor = db.purchases.find({"user_id": user_id}).sort("purchased_at", -1)
+    purchases = await cursor.to_list(100)
+    
+    return [
+        Purchase(
+            id=str(p["_id"]),
+            item_id=p["item_id"],
+            item_name=p["item_name"],
+            cost=p["cost"],
+            purchased_at=p["purchased_at"]
+        )
+        for p in purchases
+    ]
+
 @router.post("/items", status_code=status.HTTP_201_CREATED)
 async def create_item(item_in: ItemCreate, current_user: User = Depends(get_current_user)):
     """Admin only: Create a new shop item."""
@@ -66,6 +112,16 @@ async def buy_item(item_id: str, current_user: User = Depends(get_current_user))
         {"_id": current_user.id},
         {"$inc": {"stats.gold": -item_cost}}
     )
+    
+    # Record Purchase
+    purchase_record = {
+        "user_id": current_user.id,
+        "item_id": item_id,
+        "item_name": item_data["name"],
+        "cost": item_cost,
+        "purchased_at": datetime.utcnow()
+    }
+    await db.purchases.insert_one(purchase_record)
     
     # Apply Effect (Simple logic for now)
     if item_data.get("effect_type") == "hp_restore":
