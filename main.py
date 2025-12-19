@@ -3,19 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from routes import auth, tasks, shop, analytics
 from core.config import settings
-from core.scheduler import start_scheduler, run_daily_maintenance
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup
-    start_scheduler()
-    # Run maintenance check immediately on startup
-    await run_daily_maintenance()
-    yield
-    # Shutdown
-    pass
 
-app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
+app = FastAPI(title=settings.APP_NAME)
 
 print(settings.FRONTEND_URL)
 
