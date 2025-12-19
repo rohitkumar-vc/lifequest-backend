@@ -51,16 +51,38 @@ The core of LifeQuest is its gamification system. User stats (`hp`, `xp`, `gold`
 - **Self-Healing Data**: The `/auth/me` endpoint includes logic to automatically fix inconsistent data (e.g., outdated `max_xp` values) when a user logs in, ensuring backward compatibility without complex migration scripts.
 - **Admin Registration**: Registration is restricted. Only Admins can invite/create new users via the Admin Dashboard. New users are created with a default password (`Test1234`) and receive an email invitation.
 
-### 3. Task Management Logic (`routes/tasks.py`)
-- **Habits**: 
-    - Tracking uses `last_completed_date`.
-    - **Undo Logic**: Allows reverting an accidental click. It intelligently handles streaks (decrementing if needed) and reverts XP/Gold gains.
-- **Dailies**:
-    - Similar toggle logic. 
-    - **Logging**: Every completion or undo action writes to the `activity_logs` collection for historical tracking.
-- **Todos**:
-    - Simple binary state (Complete/Pending).
-    - **Undo**: Recently updated to allow unchecking a box, which refunds the rewards granted.
+### 4. Habit System (Gamified Logic)
+The Habit System uses a **4-State Logic** engine to enforce Positive (Building) and Negative (Breaking) behaviors.
+
+#### Data Model (`models/habit.py`)
+Habits are stored in a dedicated `habits` collection.
+```python
+class Habit(BaseModel):
+    title: str
+    type: str         # 'positive' | 'negative'
+    difficulty: str   # 'easy' | 'medium' | 'hard'
+    current_streak: int
+    best_streak: int
+    milestones: List[Milestone]
+```
+
+#### The 4-State Trigger Logic (`POST /habits/{id}/trigger`)
+| Type | Action | Intent | Effect |
+| :--- | :--- | :--- | :--- |
+| **Positive** | **Success** | Performed good habit | +XP, +Gold, Streak++ |
+| **Positive** | **Failure** | Skipped good habit | -HP, Streak Reset |
+| **Negative** | **Success** | Resisted bad habit | +XP, +Gold, Streak++ |
+| **Negative** | **Failure** | Indulged bad habit | -HP, Streak Reset |
+
+#### Milestones
+The system automatically checks for milestones (7, 21, 30, 66 days) on every success trigger. Unlocking a milestone grants bonus XP/Gold and adds a badge to the habit.
+
+> **Note**: Milestone rewards are scaled by the Habit's difficulty:
+> *   **Easy**: 1x
+> *   **Medium**: 1.5x
+> *   **Hard**: 2x
+
+### 5. Task Management (Dailies, Todos)
 
 ### 4. Shop & Inventory
 - Users can spend Gold to buy items.
