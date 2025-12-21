@@ -34,24 +34,6 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        if token == settings.CROSS_SITE_API_KEY:
-            return User(
-                username="system_admin",
-                email="admin@system.local",
-                full_name="System Administrator",
-                hashed_password="N/A_API_ACCESS",  # Placeholder
-                role="admin",
-                status="active",
-                is_active=True,
-                stats=UserStats(
-                    hp=0,
-                    xp=0,
-                    gold=0.0,
-                    level=1,
-                    max_xp=10
-                )
-            )
-
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         user_id: str = payload.get("sub")
         if user_id is None:
