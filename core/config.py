@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     
     # cross site access
     CROSS_SITE_API_KEY: str = os.getenv("CROSS_SITE_API_KEY", "")
+    QSTASH_TOKEN: str = os.getenv("QSTASH_TOKEN", "")
     
     # Game Configuration (Defaults)
     # Scaling XP: Index 0 = Lvl 1->2, Index 1 = Lvl 2->3, etc.

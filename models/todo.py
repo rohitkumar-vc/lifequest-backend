@@ -19,8 +19,8 @@ class Todo(BaseModel):
     qstash_message_id: Optional[str] = None
     
     # Economy Tracking (The "Loan")
-    upfront_gold_given: float = 0.0
-    potential_reward: float = 0.0
+    upfront_gold_given: int = 0
+    potential_reward: int = 0
     
     created_at: datetime = Field(default_factory=datetime.now)
 

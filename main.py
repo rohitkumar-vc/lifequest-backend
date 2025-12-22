@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from routes import auth, tasks, shop, analytics, habits
+from routes import auth, tasks, shop, analytics, habits, todos
 from core.config import settings
 
 
@@ -32,6 +32,7 @@ app.include_router(tasks.router)
 app.include_router(shop.router)
 app.include_router(analytics.router)
 app.include_router(habits.router)
+app.include_router(todos.router)
 
 @app.get("/")
 def read_root():

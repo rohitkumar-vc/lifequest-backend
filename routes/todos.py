@@ -33,9 +33,9 @@ async def create_todo(todo_in: TodoCreate, current_user: User = Depends(get_curr
     # Calculate Rewards
     base_reward = settings.TODO_REWARD_GOLD
     mult = settings.TODO_DIFFICULTY_MULTIPLIERS.get(todo_in.difficulty, 1)
-    potential_reward = base_reward * mult
+    potential_reward = int(base_reward * mult)
     
-    upfront_gold = 0.0
+    upfront_gold = 0
     qstash_id = None
     
     # Create DB Object
@@ -117,7 +117,7 @@ async def check_todo_validity(todo_id: str):
     if todo.status == "active":
         # Mark Overdue
         # Penalty: Lose 2x Upfront (Net loss: -1x Reward)
-        penalty = 2 * todo.upfront_gold_given
+        penalty = int(2 * todo.upfront_gold_given)
         
         await db.todos.update_one(
             {"_id": ObjectId(todo_id)},
@@ -128,7 +128,7 @@ async def check_todo_validity(todo_id: str):
         user_data = await db.users.find_one({"_id": ObjectId(todo.user_id)})
         if user_data:
             current_gold = user_data["stats"]["gold"]
-            new_gold = max(0, current_gold - penalty) # Prevent negative? Or allow debt? Let's prevent negative.
+            new_gold = max(0, int(current_gold - penalty)) # Prevent negative? Or allow debt? Let's prevent negative.
             
             await db.users.update_one(
                 {"_id": ObjectId(todo.user_id)},
@@ -182,10 +182,10 @@ async def update_todo(todo_id: str, todo_in: TodoUpdate, current_user: User = De
         if old_deadline and not new_deadline:
             # Revert Loan (Take back gold)
             if todo.upfront_gold_given > 0:
-                gold_to_remove = todo.upfront_gold_given
-                new_gold = max(0, current_user.stats.gold - gold_to_remove)
+                gold_to_remove = int(todo.upfront_gold_given)
+                new_gold = max(0, int(current_user.stats.gold - gold_to_remove))
                 await db.users.update_one({"_id": current_user.id}, {"$set": {"stats.gold": new_gold}})
-                update_data["upfront_gold_given"] = 0.0
+                update_data["upfront_gold_given"] = 0
             
             # Cancel Schedule
             if todo.qstash_message_id:
@@ -196,8 +196,8 @@ async def update_todo(todo_id: str, todo_in: TodoUpdate, current_user: User = De
         elif not old_deadline and new_deadline:
             if new_deadline > now:
                 # Give Loan
-                reward = todo.potential_reward # calculated on create
-                new_gold = current_user.stats.gold + reward
+                reward = int(todo.potential_reward) # calculated on create
+                new_gold = int(current_user.stats.gold + reward)
                 await db.users.update_one({"_id": current_user.id}, {"$set": {"stats.gold": new_gold}})
                 update_data["upfront_gold_given"] = reward
                 
@@ -242,11 +242,11 @@ async def complete_todo(todo_id: str, current_user: User = Depends(get_current_u
     # Result: If Loan given (+R), and now (+R), Total = +2R.
     # If no Loan (no deadline), just +R.
     # Wait, simple logic:
-    reward = todo.potential_reward
-    xp_gain = settings.TODO_XP_VALUE * settings.TODO_DIFFICULTY_MULTIPLIERS.get(todo.difficulty, 1)
+    reward = int(todo.potential_reward)
+    xp_gain = int(settings.TODO_XP_VALUE * settings.TODO_DIFFICULTY_MULTIPLIERS.get(todo.difficulty, 1))
     
     # Update User
-    new_gold = current_user.stats.gold + reward
+    new_gold = int(current_user.stats.gold + reward)
     new_level, new_xp, new_max_xp = calculate_new_level_and_xp(
         current_user.stats.level, current_user.stats.xp, xp_gain
     )
@@ -282,18 +282,20 @@ async def delete_todo(todo_id: str, current_user: User = Depends(get_current_use
         raise HTTPException(status_code=404)
     todo = Todo(**todo_data)
     
-    # Cancel Schedule
-    if todo.qstash_message_id:
-        cancel_previous_schedule(todo.qstash_message_id)
-        
-    # Penalty: Return Loan
-    penalty = todo.upfront_gold_given
-    if penalty > 0:
-        new_gold = max(0, current_user.stats.gold - penalty)
-        await db.users.update_one(
-            {"_id": current_user.id},
-            {"$set": {"stats.gold": new_gold}}
-        )
+    # Only apply cleanup/penalty if NOT completed
+    if todo.status != 'completed':
+        # Cancel Schedule
+        if todo.qstash_message_id:
+            cancel_previous_schedule(todo.qstash_message_id)
+            
+        # Penalty: Return Loan
+        penalty = int(todo.upfront_gold_given)
+        if penalty > 0:
+            new_gold = max(0, int(current_user.stats.gold - penalty))
+            await db.users.update_one(
+                {"_id": current_user.id},
+                {"$set": {"stats.gold": new_gold}}
+            )
         
     await db.todos.delete_one({"_id": ObjectId(todo_id)})
     return {"message": "Deleted"}
@@ -315,12 +317,12 @@ async def renew_todo(todo_id: str, renew_data: TodoUpdate, current_user: User = 
          raise HTTPException(status_code=400, detail="Must provide future deadline")
 
     # Pay Cost
-    cost = 0.10 * todo.potential_reward
+    cost = int(0.10 * todo.potential_reward)
     if current_user.stats.gold < cost:
         raise HTTPException(status_code=400, detail="Not enough gold to renew")
         
     # Deduct Cost
-    new_gold = current_user.stats.gold - cost
+    new_gold = int(current_user.stats.gold - cost)
     await db.users.update_one({"_id": current_user.id}, {"$set": {"stats.gold": new_gold}})
     
     # Schedule New Check
