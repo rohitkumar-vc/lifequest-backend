@@ -6,8 +6,9 @@ LifeQuest is a gamified productivity application designed to make habit tracking
 ## Technology Stack
 - **Framework**: FastAPI (Python 3.10+)
 - **Database**: MongoDB (accessed via Motor for async operations)
-- **Validation**: Pydantic
+- **Validation**: Pydantic V2
 - **Authentication**: JWT (JSON Web Tokens) with `python-jose` and `passlib`
+- **Scheduler**: Serverless scheduling via **QStash** (for Todo deadlines)
 - **Email Service**: Mailgun API (via `requests`)
 - **Server**: Uvicorn
 
@@ -16,102 +17,73 @@ LifeQuest is a gamified productivity application designed to make habit tracking
 backend/
 ├── core/               # Core configuration and utilities
 │   ├── config.py       # Settings (Env vars, Game constants)
-│   ├── database.py     # MongoDB connection logic
+│   ├── database.py     # MongoDB connection logic (PyObjectId Pydantic V2)
 │   ├── security.py     # Password hashing and JWT generation
-│   ├── email.py        # Mailgun email integration
 │   ├── leveling.py     # Scaling XP and level-up logic
-│   └── time_utils.py   # Timezone handling helpers
+│   └── time_utils.py   # Timezone handling helpers (IST default)
 ├── models/             # Pydantic models for data validation
 │   ├── user.py         # User and UserStats models
-│   ├── task.py         # Task models (Habit, Daily, Todo)
-│   ├── shop.py         # Shop item models
-│   └── analytics.py    # Activity log models
+│   ├── todo.py         # Todo model (deadlines, economy, QStash)
+│   ├── habit.py        # Habit model
+│   ├── task.py         # Legacy/Generic Task models
+│   └── ...
 ├── routes/             # API Endpoints
-│   ├── auth.py         # Login, Register, Profile, Admin Invite
-│   ├── tasks.py        # Task CRUD and specialized toggle logic
-│   ├── shop.py         # Shop item management and purchase logic
-│   └── analytics.py    # Captain's Log (Activity History)
-├── templates/          # HTML templates for emails
-├── main.py             # Application entry point (CORS, Route inclusion)
-└── create_admin.py     # Script to seed an initial admin user
+│   ├── auth.py         # Login, Register, Profile
+│   ├── todos.py        # Todo creation, completion, renewal, webhooks
+│   ├── habits.py       # Habit tracking logic
+│   ├── tasks.py        # Dailies
+│   └── ...
+├── utils/
+│   └── scheduler.py    # QStash integration logic
+├── main.py             # Application entry point
+└── requirements.txt    # Python dependencies
 ```
 
 ## Key Logic & Design Decisions
 
 ### 1. Gamification Engine
-The core of LifeQuest is its gamification system. User stats (`hp`, `xp`, `gold`, `level`) are central to every action.
-- **Leveling**: We use a scaling XP system where each level requires progressively more XP. This is handled by `calculate_new_level_and_xp` in `core/leveling.py`.
-- **Rewards**: 
-    - **Todos**: Grant Gold and XP upon completion. Can be "undone" (toggled), which reverts rewards.
-    - **Habits**: Can be Good (Positive) or Bad (Negative). Positive habits grant rewards; Negative habits deduct HP. Streak multipliers apply to rewards.
-    - **Dailies**: Must be done every day. Grant rewards on completion. (Future: Penalties for missed dailies via scheduler).
+User stats (`hp`, `xp`, `gold`, `level`) are central to every action.
+- **Leveling**: Scaling XP system.
+- **Economy**: Gold is stored strictly as **Integers** to prevent floating-point errors.
 
-### 2. Authentication & Security
-- **JWT**: A stateless authentication mechanism. Access tokens are short-lived (30 mins), while refresh tokens are long-lived (7 days).
-- **Self-Healing Data**: The `/auth/me` endpoint includes logic to automatically fix inconsistent data (e.g., outdated `max_xp` values) when a user logs in, ensuring backward compatibility without complex migration scripts.
-- **Admin Registration**: Registration is restricted. Only Admins can invite/create new users via the Admin Dashboard. New users are created with a default password (`Test1234`) and receive an email invitation.
+### 2. The "Todo Bet" System (Dedicated `todos` collection)
+Todos are no longer simple checkboxes; they are "Bets" on your productivity.
+- **Creation**:
+    - If a **Deadline** is set, you receive the Gold Reward **UPFRONT** (as a Loan).
+    - A serverless webhook is scheduled via **QStash** for the exact deadline time.
+- **Completion**:
+    - If completed before the deadline, you keep the loan AND get a completion bonus (plus XP).
+- **Overdue (The Validation Webhook)**:
+    - If the deadline hits and the task is active, QStash hits `/check_validity`.
+    - **Penalty**: You lose **2x** the Upfront Gold (Repaying the loan + paying a fine).
+- **Renewal**:
+    - An overdue task can be renewed for a fee (10% of reward) to set a new deadline.
 
-### 4. Habit System (Gamified Logic)
-The Habit System uses a **4-State Logic** engine to enforce Positive (Building) and Negative (Breaking) behaviors.
+### 3. Habit System
+Uses a **4-State Logic** engine for Building (+) and Breaking (-) habits.
+- **Positive**: Success (+XP/Gold), Fail (-HP).
+- **Negative**: Resisted (+XP/Gold), Indulged (-HP).
+- **Milestones**: Automatic bonuses at streak intervals (7, 21, 30 days).
 
-#### Data Model (`models/habit.py`)
-Habits are stored in a dedicated `habits` collection.
-```python
-class Habit(BaseModel):
-    title: str
-    type: str         # 'positive' | 'negative'
-    difficulty: str   # 'easy' | 'medium' | 'hard'
-    current_streak: int
-    best_streak: int
-    milestones: List[Milestone]
-```
-
-#### The 4-State Trigger Logic (`POST /habits/{id}/trigger`)
-| Type | Action | Intent | Effect |
-| :--- | :--- | :--- | :--- |
-| **Positive** | **Success** | Performed good habit | +XP, +Gold, Streak++ |
-| **Positive** | **Failure** | Skipped good habit | -HP, Streak Reset |
-| **Negative** | **Success** | Resisted bad habit | +XP, +Gold, Streak++ |
-| **Negative** | **Failure** | Indulged bad habit | -HP, Streak Reset |
-
-#### Milestones
-The system automatically checks for milestones (7, 21, 30, 66 days) on every success trigger. Unlocking a milestone grants bonus XP/Gold and adds a badge to the habit.
-
-> **Note**: Milestone rewards are scaled by the Habit's difficulty:
-> *   **Easy**: 1x
-> *   **Medium**: 1.5x
-> *   **Hard**: 2x
-
-### 5. Task Management (Dailies, Todos)
-
-### 4. Shop & Inventory
-- Users can spend Gold to buy items.
-- **Atomic Transactions**: Purchases prevent negative gold balance.
-- **Admin Control**: Admins can dynamically add new items to the global shop.
+### 4. Scheduler (QStash)
+- Instead of a running background process (Celery), we use **Upstash QStash**.
+- When a Todo is created, we publish a message to QStash with a `not_before` timestamp.
+- QStash calls our webhook `POST /todos/check_validity/{id}` at the exact time.
+- Security: The webhook is protected by a custom `CROSS_SITE_API_KEY` Bearer token.
 
 ## API Endpoints Summary
 
-### Authentication (`/auth`)
-- `POST /login`: Get Access and Refresh tokens.
-- `POST /refresh`: Get a new Access token using a Refresh token.
-- `GET /me`: Get current user profile (with auto-healing stats).
-- `POST /admin/register-user`: (Admin only) Create a new user account.
+### Todos (`/todos`)
+- `POST /`: Create a Todo (starts the Bet/Loan logic).
+- `PUT /{id}`: Update details. Reschedules if deadline changes.
+- `POST /{id}/complete`: Mark done, cancel schedule, award XP.
+- `DELETE /{id}`: Delete. (Free if completed, Repays loan if active).
+- `POST /{id}/renew`: Pay 10% fee to reschedule overdue item.
+- `POST /check_validity/{id}`: (Webhook) Triggers Overdue state and Penalty.
 
-### Tasks (`/tasks`)
-- `GET /`: List all tasks for the user.
-- `POST /`: Create a new task.
-- `POST /{id}/complete`: Toggle status for Todos.
-- `POST /{id}/habit-toggle`: Trigger a positive/negative habit or undo.
-- `POST /{id}/daily-toggle`: Mark a daily as done/undone.
-- `DELETE /{id}`: Remove a task.
-
-### Shop (`/shop`)
-- `GET /items`: List available items.
-- `POST /purchase/{item_id}`: Buy an item.
-- `POST /items`: (Admin only) Add a new item to the shop.
-
-### Analytics (`/analytics`)
-- `GET /logs`: Retrieve the user's activity history (Captain's Log).
+### Habits (`/habits`)
+- `POST /`: Create Habit.
+- `POST /{id}/trigger`: Log an action (Positive/Negative).
 
 ## Setup & Running
 
@@ -124,12 +96,14 @@ The system automatically checks for milestones (7, 21, 30, 66 days) on every suc
    # Security
    SECRET_KEY=your_secret_key_here
    ALGORITHM=HS256
-   ACCESS_TOKEN_EXPIRE_MINUTES=30
-
-   # Mailgun (Email)
-   MAILGUN_API_KEY=your_key
-   MAILGUN_DOMAIN=your_domain
-   MAIL_FROM=LifeQuest Admin
+   
+   # QStash (Required for Todos)
+   QSTASH_TOKEN=your_qstash_token
+   CROSS_SITE_API_KEY=your_secret_webhook_key
+   BACKEND_URL=https://your-public-url.com # for QStash to hit
+   
+   # Mailgun
+   # ...
    ```
 
 2. **Install Dependencies**:

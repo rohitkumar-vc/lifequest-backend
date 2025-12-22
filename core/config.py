@@ -18,11 +18,18 @@ class Settings(BaseSettings):
     # Frontend
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
+    # backend
+    BACKEND_URL: str = os.getenv("BACKEND_URL", "http://localhost:8000")
+    
     # Email (Mailgun)
     MAILGUN_API_KEY: str = os.getenv("MAILGUN_API_KEY", "")
     MAILGUN_DOMAIN: str = os.getenv("MAILGUN_DOMAIN", "") # e.g., sandbox....mailgun.org
     MAIL_FROM: str = os.getenv("MAIL_FROM", "LifeQuest Admin")
     TEMPLATE_FOLDER: str = "templates/email"
+    
+    # cross site access
+    CROSS_SITE_API_KEY: str = os.getenv("CROSS_SITE_API_KEY", "")
+    QSTASH_TOKEN: str = os.getenv("QSTASH_TOKEN", "")
     
     # Game Configuration (Defaults)
     # Scaling XP: Index 0 = Lvl 1->2, Index 1 = Lvl 2->3, etc.
